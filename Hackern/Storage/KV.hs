@@ -5,7 +5,6 @@ module Hackern.Storage.KV(
 ) where
 
 import Prelude hiding (lookup)
-import Hypervisor.Debug
 import Data.Binary
 import Control.Monad.State.Strict hiding (put, get)
 import qualified Data.Map.Strict as Map
@@ -13,8 +12,6 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import System.Device.BlockDevice
 import System.Device.Memory
-
-memDev = newMemoryBlockDevice 4096 1048576
 
 data KVMap = KVMap { firstEmptyLocation :: Word64
                    , location :: Map.Map String Word64 } deriving (Show)
