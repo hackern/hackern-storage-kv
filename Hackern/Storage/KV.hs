@@ -17,14 +17,19 @@ import qualified Data.ByteString.Lazy as BL
 import System.Device.BlockDevice
 import System.Device.Memory
 
-data Item = Value { val :: Word64 } |
-            Pointer { pos :: Word64, len :: Word64 } deriving (Show, Eq)
+
+data Item = Value { val :: Word64 }
+          | Pointer { pos :: Word64, len :: Word64 }
+          deriving (Show, Eq)
+
 instance Binary Item where
   put (Value i) = do put (0 :: Word8)
                      put i
+
   put (Pointer len pos) = do put (1 :: Word8)
                              put len
                              put pos
+
   get = do t <- get :: Get Word8
            case t of
              0 -> do i <- get
@@ -32,15 +37,20 @@ instance Binary Item where
              1 -> do l <- get
                      p <- get
                      return (Pointer l p)
+
 instance Ord Item where
   (Pointer a _) `compare` (Pointer b _) = a `compare` b
   _ `compare` _ = 0 `compare` 0
 
-data KVMap = KVMap { size :: Word64
-                   , kvmap :: Map.Map String Item } deriving (Show)
+data KVMap = KVMap {
+    size  :: Word64,
+    kvmap :: Map.Map String Item
+} deriving (Show)
+
 instance Binary KVMap where
   put (KVMap i m) = do put i
                        put m
+
   get = do i <- get
            m <- get
            return (KVMap i m)
@@ -62,11 +72,11 @@ lookup dev key = do
     getValue :: KVMap -> String -> Word64
     getValue m k =
       case Map.lookup k $ kvmap m of
-      Just a -> val a
-      Nothing -> 0
+        Just a  -> val a
+        Nothing -> 0
                
 insert :: Monad m =>
-          BlockDevice m -> String -> Word64 -> m()
+          BlockDevice m -> String -> Word64 -> m ()
 insert dev key val = do
   b <- bdReadBlock dev 0
   let bd = decode (BL.fromStrict b) :: KVMap
@@ -105,6 +115,7 @@ store dev key value = do
 
 delete :: Monad m =>
           BlockDevice m -> String -> m()
+
 delete dev key = do
   b <- bdReadBlock dev 0
   let bd = decode (BL.fromStrict b) :: KVMap
@@ -117,11 +128,14 @@ largestEmptyBlock m = leb 4 (size m) (sorted (Map.elems (kvmap m)))
     leb :: Word64 -> Word64 -> [Item] -> Item
     leb i size [] = Pointer i (size - i)
     leb i size m = minb (Pointer i ((pos (head m)) - i)) (leb ((pos (head m)) + (len (head m))) size (tail m))
+
     sorted m = List.sort $ filter isPointer m
+
     isPointer :: Item -> Bool
     isPointer m = case m of
                     Pointer _ _ -> True
                     Value _ -> False
+
     minb (Pointer a b) (Pointer c d)
       | b < d = Pointer c d
       | otherwise = Pointer a b
