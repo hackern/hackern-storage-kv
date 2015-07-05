@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Hackern.Storage.KV(
   mkKVStorage,
   insert,
@@ -16,27 +18,13 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import System.Device.BlockDevice
 import System.Device.Memory
-
+import GHC.Generics
 
 data Item = Value { val :: Word64 }
           | Pointer { pos :: Word64, len :: Word64 }
-          deriving (Show, Eq)
+          deriving (Show, Eq, Generic)
 
-instance Binary Item where
-  put (Value i) = do put (0 :: Word8)
-                     put i
-
-  put (Pointer len pos) = do put (1 :: Word8)
-                             put len
-                             put pos
-
-  get = do t <- get :: Get Word8
-           case t of
-             0 -> do i <- get
-                     return (Value i)
-             1 -> do l <- get
-                     p <- get
-                     return (Pointer l p)
+instance Binary Item
 
 instance Ord Item where
   (Pointer a _) `compare` (Pointer b _) = a `compare` b
