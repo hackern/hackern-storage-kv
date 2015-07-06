@@ -18,7 +18,7 @@ import System.Device.Memory
 import GHC.Generics
 
 class KV a where
-  load   :: Monad m => BlockDevice m -> String -> m a
+  load   :: Monad m => BlockDevice m -> String -> m (Maybe a)
   store  :: Monad m => BlockDevice m -> String -> a -> m ()
 
 delete :: Monad m => BlockDevice m -> String -> m ()
@@ -58,11 +58,11 @@ instance KV Word64 where
     let val = getValue bd key
     return val
     where
-      getValue :: KVMap -> String -> Word64
+      getValue :: KVMap -> String -> Maybe Word64
       getValue m k =
         case Map.lookup k $ kvmap m of
-          Just a  -> val a
-          Nothing -> 0
+          Just a  -> Just $ val a
+          Nothing -> Nothing
              
   store dev key val = do
     b <- bdReadBlock dev 0
@@ -76,16 +76,11 @@ instance KV String where
   load dev key = do
     b <- bdReadBlock dev 0
     let bd = decode (BL.fromStrict b) :: KVMap
-    let loc = getLocation bd key
-    b <- bdReadBlock dev loc
-    let bd = decode (BL.fromStrict b) :: String
-    return bd
-    where
-      getLocation :: KVMap -> String -> Word64
-      getLocation m k =
-        case Map.lookup k $ kvmap m of
-        Just a -> pos a
-        Nothing -> 0
+    case Map.lookup key $ kvmap bd of
+      Just a -> do
+        b <- bdReadBlock dev (pos a)
+        return $ Just (decode (BL.fromStrict b) :: String)
+      Nothing -> return Nothing
 
   store dev key value = do
     let e = encode value
