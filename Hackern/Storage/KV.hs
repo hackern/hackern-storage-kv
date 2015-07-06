@@ -1,12 +1,9 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, TypeSynonymInstances, FlexibleInstances #-}
 
 module Hackern.Storage.KV(
-  mkKVStorage,
-  insert,
-  lookup,
-  load,
-  store,
-  delete
+  mkKVStorage
+, KV(..)
+, delete
 ) where
 
 import Prelude hiding (lookup)
@@ -19,6 +16,17 @@ import qualified Data.ByteString.Lazy as BL
 import System.Device.BlockDevice
 import System.Device.Memory
 import GHC.Generics
+
+class KV a where
+  load   :: Monad m => BlockDevice m -> String -> m a
+  store  :: Monad m => BlockDevice m -> String -> a -> m ()
+
+delete :: Monad m => BlockDevice m -> String -> m ()
+
+mkKVStorage :: Monad m => BlockDevice m -> Word64 -> m ()
+
+
+-------- IMPLEMENTATION --------
 
 data Item = Value { val :: Word64 }
           | Pointer { pos :: Word64, len :: Word64 }
@@ -33,76 +41,62 @@ instance Ord Item where
 data KVMap = KVMap {
     size  :: Word64,
     kvmap :: Map.Map String Item
-} deriving (Show)
+} deriving (Show, Generic)
 
-instance Binary KVMap where
-  put (KVMap i m) = do put i
-                       put m
+instance Binary KVMap 
 
-  get = do i <- get
-           m <- get
-           return (KVMap i m)
 
-mkKVStorage :: Monad m =>
-               BlockDevice m -> Word64 -> m ()
 mkKVStorage dev sz = do
   let e = KVMap (sz - 4) Map.empty
   bdWriteBlock dev 0 (BL.toStrict $ encode e)
 
-lookup :: Monad m =>
-          BlockDevice m -> String -> m Word64
-lookup dev key = do
-  b <- bdReadBlock dev 0
-  let bd = decode (BL.fromStrict b) :: KVMap
-  let val = getValue bd key
-  return val
-  where
-    getValue :: KVMap -> String -> Word64
-    getValue m k =
-      case Map.lookup k $ kvmap m of
-        Just a  -> val a
+
+instance KV Word64 where
+  load dev key = do
+    b <- bdReadBlock dev 0
+    let bd = decode (BL.fromStrict b) :: KVMap
+    let val = getValue bd key
+    return val
+    where
+      getValue :: KVMap -> String -> Word64
+      getValue m k =
+        case Map.lookup k $ kvmap m of
+          Just a  -> val a
+          Nothing -> 0
+             
+  store dev key val = do
+    b <- bdReadBlock dev 0
+    let bd = decode (BL.fromStrict b) :: KVMap
+    let n = Map.insert key (Value val) $ kvmap bd
+    let m = KVMap (size bd) n
+    bdWriteBlock dev 0 (BL.toStrict $ encode m)
+
+
+instance KV String where               
+  load dev key = do
+    b <- bdReadBlock dev 0
+    let bd = decode (BL.fromStrict b) :: KVMap
+    let loc = getLocation bd key
+    b <- bdReadBlock dev loc
+    let bd = decode (BL.fromStrict b) :: String
+    return bd
+    where
+      getLocation :: KVMap -> String -> Word64
+      getLocation m k =
+        case Map.lookup k $ kvmap m of
+        Just a -> pos a
         Nothing -> 0
-               
-insert :: Monad m =>
-          BlockDevice m -> String -> Word64 -> m ()
-insert dev key val = do
-  b <- bdReadBlock dev 0
-  let bd = decode (BL.fromStrict b) :: KVMap
-  let n = Map.insert key (Value val) $ kvmap bd
-  let m = KVMap (size bd) n
-  bdWriteBlock dev 0 (BL.toStrict $ encode m)
-               
-load :: Monad m =>
-        BlockDevice m -> String -> m String
-load dev key = do
-  b <- bdReadBlock dev 0
-  let bd = decode (BL.fromStrict b) :: KVMap
-  let loc = getLocation bd key
-  b <- bdReadBlock dev loc
-  let bd = decode (BL.fromStrict b) :: String
-  return bd
-  where
-    getLocation :: KVMap -> String -> Word64
-    getLocation m k =
-      case Map.lookup k $ kvmap m of
-      Just a -> pos a
-      Nothing -> 0
 
-store :: Monad m =>
-         BlockDevice m -> String -> String -> m()
-store dev key value = do
-  let e = encode value
-  let sz = fromIntegral $ BL.length e `div` 4096 + 1
-  b <- bdReadBlock dev 0
-  let bd = decode (BL.fromStrict b) :: KVMap
-  let f = pos $ largestEmptyBlock bd
-  let n = Map.insert key (Pointer f sz) $ kvmap bd
-  let m = KVMap (size bd) n
-  bdWriteBlock dev 0 (BL.toStrict $ encode m)
-  bdWriteBlock dev f (BL.toStrict $ e)
-
-delete :: Monad m =>
-          BlockDevice m -> String -> m()
+  store dev key value = do
+    let e = encode value
+    let sz = fromIntegral $ BL.length e `div` 4096 + 1
+    b <- bdReadBlock dev 0
+    let bd = decode (BL.fromStrict b) :: KVMap
+    let f = pos $ largestEmptyBlock bd
+    let n = Map.insert key (Pointer f sz) $ kvmap bd
+    let m = KVMap (size bd) n
+    bdWriteBlock dev 0 (BL.toStrict $ encode m)
+    bdWriteBlock dev f (BL.toStrict $ e)
 
 delete dev key = do
   b <- bdReadBlock dev 0
@@ -127,3 +121,4 @@ largestEmptyBlock m = leb 4 (size m) (sorted (Map.elems (kvmap m)))
     minb (Pointer a b) (Pointer c d)
       | b < d = Pointer c d
       | otherwise = Pointer a b
+
